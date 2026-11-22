@@ -1,0 +1,49 @@
+# Local configuration & secrets
+config/config.local.php
+*.local.php
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Exported report CSVs & local database backups
+laporan-pilahin-*.csv
+*.sql.gz
+*.sql.bak
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs, caches & temporary/backup files
+*.log
+*.cache
+*.tmp
+*.temp
+*.bak
+*.backup
+*.orig
+php_errorlog
+
+# Dependencies (if added later)
+/vendor/
+/node_modules/
+
+# IDE & editors
+.vscode/
+.idea/
+*.sublime-workspace
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+._*
+Thumbs.db
+ehthumbs.db
+desktop.ini
+$RECYCLE.BIN/
