@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pilahin - Panduan Pilah Sampah dari Rumah</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div class="wrap"><a class="logo" href="#home">Pilahin</a>
+<nav><a href="#home">Cari</a><a href="#kategori">Kategori</a><a href="#kuis">Kuis</a><a href="#lapor">Lapor</a></nav></div></header>
+
+<main>
+<section class="hero s1" id="home"><div class="wrap">
+<h1>Sampahmu masuk tempat sampah yang mana?</h1>
+<p class="lead">Ketik nama barangnya. Pilahin menunjukkan tempat sampah yang tepat, lengkap dengan warnanya.</p>
+<div class="finder"><input id="q" type="search" placeholder="Contoh: botol plastik, baterai, kulit pisang" aria-label="Cari jenis sampah" autocomplete="off"><button class="btn" id="go" type="button">Cari</button></div>
+<div class="answer" id="ans" aria-live="polite">Hasil pencarian muncul di sini. Kamu juga bisa menekan salah satu tempat sampah di bawah.</div>
+<div class="bins" id="bins"></div>
+</div></section>
+
+<section class="cats s2" id="kategori"><div class="wrap">
+<h2>Enam jenis, enam warna</h2>
+<p class="lead">Pegangan dasar untuk memilah sampah di rumah.</p>
+<div id="list" style="margin-top:28px;border-top:1px solid var(--line)"></div>
+</div></section>
+
+<section id="kuis" class="s3"><div class="wrap">
+<h2>Uji kebiasaan memilahmu</h2>
+<p class="lead">Lima pertanyaan singkat. Langsung tahu jawabannya setelah memilih.</p>
+<div class="panel" id="quiz" style="margin-top:28px"></div>
+</div></section>
+
+<section id="lapor" class="s4"><div class="wrap">
+<h2>Lihat tumpukan sampah liar?</h2>
+<p class="lead">Isi formulir ini untuk mencatat lokasinya.</p>
+<div class="panel" style="margin-top:28px">
+<form id="rf">
+<label>Jenis sampah<select id="rj" required><option value="">Pilih jenis sampah</option><option>Organik</option><option>Plastik</option><option>Kertas</option><option>B3</option><option>Residu</option><option>Elektronik</option><option>Campuran</option></select></label>
+<label>Lokasi<input id="rl" required placeholder="Nama jalan, RT/RW, atau patokan"></label>
+<label>Keterangan<textarea id="rk" rows="3" placeholder="Seberapa banyak? Sudah berapa lama?"></textarea></label>
+<button class="btn" type="submit">Kirim laporan</button>
+<p class="fb" id="rerr" aria-live="polite"></p>
+</form>
+<div id="done" class="hidden"><h3 style="font-size:26px">Laporan tercatat</h3><p class="lead" id="dtxt"></p><button class="btn ghost" id="again" type="button" style="margin-top:18px">Buat laporan lain</button></div>
+</div>
+</div></section>
+</main>
+
+<footer><div class="wrap"><b style="color:var(--ink)">Pilahin</b> – panduan pilah sampah dari rumah. © 2026 Pilahin. Proyek desain web.</div></footer>
+
+<script src="data.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
