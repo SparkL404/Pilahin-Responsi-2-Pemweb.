@@ -1,5 +1,5 @@
 const $=s=>document.querySelector(s);
-const bins=$('#bins'),ans=$('#ans'),list=$('#list'),qInput=$('#q'),sug=$('#sug');
+const bins=$('#bins'),ans=$('#ans'),list=$('#list'),qInput=$('#q'),sug=$('#sug'),finderField=$('.finder-field');
 const DEFAULT_ANS=ans?ans.textContent:'';
 const reducedMotion=()=>Boolean(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -14,8 +14,16 @@ const BIN_ICONS={
  default:'<path d="M9.5 6v12M14.5 6v12"/>'
 };
 
+const RJ_HINTS={
+ B3:'B3 (baterai, lampu, obat)',
+ Residu:'Residu (tisu kotor, popok)',
+ Elektronik:'Elektronik (kabel, charger)'
+};
+
 let activeSlug=null,activeToss=null;
 let sugItems=[],sugIdx=-1,sugTimer=null,sugCtrl=null;
+let searchSeq=0,searchCtrl=null;
+let allCats=[],civicStats=null;
 
 async function api(url,options){
  const res=await fetch(url,options);
@@ -25,8 +33,18 @@ async function api(url,options){
  return data;
 }
 
+function formatChipLabel(kw){
+ const s=String(kw||'').trim();
+ return s?s.charAt(0).toUpperCase()+s.slice(1):'';
+}
+
 function clearChipActive(){
- document.querySelectorAll('#chips .chip.is-active').forEach(c=>c.classList.remove('is-active'));
+ document.querySelectorAll('#chips .chip[data-q].is-active').forEach(c=>c.classList.remove('is-active'));
+}
+
+function cancelPendingSearch(){
+ searchSeq++;
+ if(searchCtrl){searchCtrl.abort();searchCtrl=null}
 }
 
 function popAnswer(){
@@ -67,6 +85,7 @@ function tossToBin(label,slug,color,originEl){
  }
  const pill=document.createElement('span');
  pill.className='toss-pill';
+ pill.setAttribute('aria-hidden','true');
  pill.textContent=label;
  pill.style.setProperty('--c',color||'#DDEB9D');
  document.body.appendChild(pill);
@@ -147,6 +166,7 @@ function setSugIndex(idx){
 function pickSug(index,originEl){
  const item=sugItems[index];
  if(!item)return;
+ cancelPendingSearch();
  const sr=(originEl&&originEl.getBoundingClientRect)?originEl.getBoundingClientRect():qInput.getBoundingClientRect();
  const rectProxy={getBoundingClientRect:()=>sr};
  qInput.value=item.keyword;
@@ -190,17 +210,27 @@ if(sug){
  });
 }
 
+if(finderField){
+ finderField.addEventListener('focusout',e=>{
+  if(!e.relatedTarget||!finderField.contains(e.relatedTarget))closeSug();
+ });
+}
+
 document.addEventListener('click',e=>{
  if(!e.target.closest('.finder-field'))closeSug();
 });
 
+const CAT_THUMBS=new Set(['organik','plastik','kertas','b3','residu','elektronik']);
+
 async function loadCats(){
  try{
   const cats=await api('api/categories.php');
+  allCats=Array.isArray(cats)?cats:[];
   bins.innerHTML='';list.innerHTML='';
   const sel=$('#rj');
+  const prevVal=sel?sel.value:'';
   if(sel){sel.innerHTML='<option value="">Pilih jenis sampah</option>'}
-  cats.forEach(v=>{
+  allCats.forEach(v=>{
    const icon=BIN_ICONS[v.slug]||BIN_ICONS.default;
    const b=document.createElement('button');
    b.type='button';b.className='bin';b.dataset.k=v.slug;
@@ -208,6 +238,7 @@ async function loadCats(){
    b.style.setProperty('--c',v.color);
    b.innerHTML='<span class="lid" aria-hidden="true"></span><span class="body" aria-hidden="true"><svg class="bin-ico" viewBox="0 0 24 24" aria-hidden="true">'+icon+'</svg></span><span class="bin-name">'+esc(v.name)+'</span>';
    b.onclick=()=>{
+    cancelPendingSearch();
     closeSug();
     clearChipActive();
     if(activeSlug===v.slug){
@@ -221,29 +252,83 @@ async function loadCats(){
    };
    bins.appendChild(b);
    const r=document.createElement('div');r.className='row';r.style.setProperty('--c',v.color);
-   r.innerHTML='<i aria-hidden="true"></i><h3>'+esc(v.name)+'</h3><p><b>Tempat sampah '+esc(v.bin)+'.</b> '+esc(v.examples)+'.</p>';
+   const thumbSrc=CAT_THUMBS.has(v.slug)?'assets/img/cat-'+v.slug+'.svg':'assets/img/cat-default.svg';
+   r.innerHTML='<img class="row-thumb" src="'+thumbSrc+'" alt="Ilustrasi contoh sampah '+esc(v.name)+'" width="64" height="64" loading="lazy" decoding="async"><i aria-hidden="true"></i><h3>'+esc(v.name)+'</h3><p><b>Tempat sampah '+esc(v.bin)+'.</b> '+esc(v.examples)+'.</p>';
    list.appendChild(r);
-   if(sel){const o=document.createElement('option');o.value=v.name;o.textContent=v.name;sel.appendChild(o)}
+   if(sel){
+    const o=document.createElement('option');
+    o.value=v.name;
+    o.textContent=RJ_HINTS[v.name]||v.name;
+    sel.appendChild(o);
+   }
   });
-  if(sel){const m=document.createElement('option');m.value='Campuran';m.textContent='Campuran';sel.appendChild(m)}
- }catch(e){ans.textContent='Gagal memuat data.'}
+  if(sel){
+   const m=document.createElement('option');m.value='Campuran';m.textContent='Campuran';sel.appendChild(m);
+   if(prevVal&&Array.from(sel.options).some(o=>o.value===prevVal))sel.value=prevVal;
+  }
+ }catch(e){
+  ans.innerHTML='Gagal memuat data kategori.<button class="ans-action" type="button" data-retry="cats">Coba lagi</button>';
+ }
 }
 
 async function search(originEl){
  closeSug();
  const t=qInput.value.trim();
- if(!t){ans.textContent='Ketik nama barang dulu, misalnya "baterai".';mark(null);popAnswer();return}
+ if(!t){
+  cancelPendingSearch();
+  ans.textContent='Ketik nama barang dulu, misalnya "baterai".';
+  mark(null);
+  popAnswer();
+  return;
+ }
+ cancelPendingSearch();
+ const mySeq=searchSeq;
+ searchCtrl=typeof AbortController!=='undefined'?new AbortController():null;
  try{
-  const d=await api('api/search.php?q='+encodeURIComponent(t));
+  const opts=searchCtrl?{signal:searchCtrl.signal}:undefined;
+  const d=await api('api/search.php?q='+encodeURIComponent(t),opts);
+  if(mySeq!==searchSeq)return;
   if(d.match){
-   showCat(d.match,'<b>'+esc(t)+'</b> masuk ke ');
+   const kw=String(d.match.keyword||'').trim();
+   const matchedCue=(kw&&kw.toLowerCase()!==t.toLowerCase())?' (cocok: '+esc(kw)+')':'';
+   showCat(d.match,'<b>'+esc(t)+'</b>'+matchedCue+' masuk ke ');
    tossToBin(t,d.match.slug,d.match.color,originEl||qInput);
   }else{
-   ans.innerHTML='Belum ada data untuk "'+esc(t)+'".<small>Coba kata yang lebih umum, atau masukkan ke Residu jika tidak bisa didaur ulang.</small>';
+   const note=t.length>=2
+    ?'Kata ini otomatis dicatat untuk ditinjau admin. Jika beracun, tajam, atau mudah terbakar, masukkan ke B3; jika kotor/tidak dapat didaur ulang, masukkan ke Residu.'
+    :'Coba kata yang lebih lengkap. Jika beracun/tajam pilih B3; jika kotor/tak dapat didaur ulang pilih Residu.';
+   const hasResidu=allCats.some(c=>c.slug==='residu');
+   const actBtn=hasResidu?'<button class="ans-action" type="button" data-slug="residu">Lihat tempat sampah Residu &rarr;</button>':'';
+   ans.innerHTML='Belum ada data untuk "<b>'+esc(t)+'</b>".<small>'+note+'</small>'+actBtn;
    mark(null);
    popAnswer();
   }
- }catch(e){ans.textContent=e.message;popAnswer()}
+ }catch(e){
+  if(e&&e.name==='AbortError')return;
+  if(mySeq!==searchSeq)return;
+  ans.textContent=e.message;
+  popAnswer();
+ }
+}
+
+if(ans){
+ ans.addEventListener('click',e=>{
+  const retry=e.target.closest('[data-retry="cats"]');
+  if(retry){
+   ans.textContent='Memuat ulang data...';
+   loadCats();
+   return;
+  }
+  const act=e.target.closest('.ans-action[data-slug]');
+  if(!act)return;
+  const targetSlug=act.dataset.slug;
+  const cat=allCats.find(c=>c.slug===targetSlug);
+  if(!cat)return;
+  showCat(cat,'');
+  triggerCatch(cat.slug);
+  const binBtn=Array.from(bins.querySelectorAll('.bin')).find(b=>b.dataset.k===cat.slug);
+  if(binBtn)binBtn.focus();
+ });
 }
 
 $('#go').onclick=()=>search($('#go'));
@@ -277,9 +362,9 @@ qInput.addEventListener('input',()=>{
  if(!t){closeSug();return}
  sugTimer=setTimeout(()=>fetchSug(t),150);
 });
-qInput.addEventListener('search',()=>{if(!qInput.value.trim()){closeSug();mark(null);ans.textContent=DEFAULT_ANS}});
+qInput.addEventListener('search',()=>{if(!qInput.value.trim()){cancelPendingSearch();closeSug();mark(null);ans.textContent=DEFAULT_ANS}});
 
-document.querySelectorAll('#chips .chip').forEach(chip=>{
+document.querySelectorAll('#chips .chip[data-q]').forEach(chip=>{
  chip.addEventListener('click',()=>{
   closeSug();
   qInput.value=chip.dataset.q;
@@ -288,6 +373,40 @@ document.querySelectorAll('#chips .chip').forEach(chip=>{
   search(chip);
  });
 });
+
+const shuffleBtn=$('#shuffle');
+if(shuffleBtn){
+ shuffleBtn.addEventListener('click',async()=>{
+  closeSug();
+  const chips=Array.from(document.querySelectorAll('#chips .chip[data-q]'));
+  if(!chips.length)return;
+  const exclude=chips.map(c=>c.dataset.q||'').filter(Boolean).join(',');
+  shuffleBtn.disabled=true;
+  if(!reducedMotion()){
+   shuffleBtn.classList.remove('spin');
+   void shuffleBtn.offsetWidth;
+   shuffleBtn.classList.add('spin');
+   shuffleBtn.addEventListener('animationend',()=>shuffleBtn.classList.remove('spin'),{once:true});
+  }
+  try{
+   const d=await api('api/search.php?mode=random&limit='+chips.length+'&exclude='+encodeURIComponent(exclude));
+   const items=Array.isArray(d.items)?d.items:[];
+   chips.forEach((chip,i)=>{
+    const it=items[i];
+    if(!it)return;
+    chip.classList.remove('is-active','swap');
+    chip.dataset.q=it.keyword;
+    chip.textContent=formatChipLabel(it.keyword);
+    chip.style.setProperty('--d',(i*35)+'ms');
+   });
+   if(!reducedMotion()){
+    void shuffleBtn.offsetWidth;
+    chips.forEach((chip,i)=>{if(items[i])chip.classList.add('swap')});
+   }
+  }catch(e){}
+  finally{shuffleBtn.disabled=false}
+ });
+}
 
 let Q=[],qi=0,sc=0;
 function ensureQuizShell(box){
@@ -314,6 +433,25 @@ function animateScore(el,target){
  requestAnimationFrame(step);
 }
 
+async function copyText(txt){
+ if(navigator.clipboard&&navigator.clipboard.writeText){
+  try{
+   await navigator.clipboard.writeText(txt);
+   return true;
+  }catch(e){}
+ }
+ try{
+  const ta=document.createElement('textarea');
+  ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.select();
+  const ok=document.execCommand('copy');
+  ta.remove();
+  return Boolean(ok);
+ }catch(e){
+  return false;
+ }
+}
+
 function rq(moveFocus=false){
  const box=$('#quiz');
  if(!Q.length){box.textContent='Soal belum tersedia.';return}
@@ -330,21 +468,42 @@ function rq(moveFocus=false){
   const passed=sc>=passScore;
   bar.classList.toggle('done',passed);
   const badge=passed?'<svg class="score-badge" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="19"/><path d="M13.5 22.5 L19.5 28.5 L30.5 16.5"/></svg>':'';
-  const heading='<h3 class="quiz-score" tabindex="-1">Skor kamu <span class="score-num">'+sc+'</span> dari '+Q.length+'</h3>';
-  stage.innerHTML=(badge?'<div class="score-head">'+badge+heading+'</div>':heading)+'<p class="lead">'+(passed?'Bagus. Kamu sudah paham cara memilah sampah.':'Lumayan. Cek lagi bagian kategori, lalu coba sekali lagi.')+'</p><button class="btn mt-sm" id="rs" type="button">Ulangi kuis</button>';
+  const heading='<h3 class="quiz-score" tabindex="-1" aria-label="Skor kamu '+sc+' dari '+Q.length+'">Skor kamu <span class="score-num" aria-hidden="true">'+sc+'</span> dari '+Q.length+'</h3>';
+  const msg=passed?'Bagus. Kamu sudah paham cara memilah sampah.':(sc===0?'Belum ada yang tepat. Cek lagi bagian kategori, lalu coba sekali lagi.':'Lumayan. Cek lagi bagian kategori, lalu coba sekali lagi.');
+  stage.innerHTML=(badge?'<div class="score-head">'+badge+heading+'</div>':heading)
+   +'<p class="lead">'+msg+'</p>'
+   +'<p class="score-compare hidden" id="qcmp" aria-live="polite"></p>'
+   +'<div class="quiz-actions"><button class="btn" id="rs" type="button">Ulangi kuis</button><button class="btn ghost" id="share-score" type="button">Salin hasil</button></div>';
   animateScore(stage.querySelector('.score-num'),sc);
   $('#rs').onclick=()=>{qi=0;sc=0;rq(true)};
+  const shareBtn=$('#share-score');
+  if(shareBtn){
+   shareBtn.onclick=()=>{
+    const pct=Math.round((sc/Q.length)*100);
+    copyText('Skor Pilahin saya '+sc+' dari '+Q.length+' ('+pct+'% benar)! Yuk uji kebiasaan pilah sampahmu.').then(ok=>{
+     if(!shareBtn)return;
+     shareBtn.textContent=ok?'Tersalin \u2713':'Gagal menyalin';
+     setTimeout(()=>{if(shareBtn)shareBtn.textContent='Salin hasil'},1800);
+    });
+   };
+  }
   if(moveFocus){const h=stage.querySelector('h3');if(h)h.focus()}
   api('api/quiz_attempts.php',{
    method:'POST',
    headers:{'Content-Type':'application/json'},
    body:JSON.stringify({score:sc,total:Q.length})
+  }).then(stats=>{
+   const cmp=$('#qcmp');
+   if(cmp&&stats&&typeof stats.avg_percent==='number'&&stats.total_attempts>0){
+    cmp.innerHTML='Rata-rata warga lain: <b>'+esc(stats.avg_percent)+'% benar</b> dari '+esc(stats.total_attempts)+' percobaan.';
+    cmp.classList.remove('hidden');
+   }
   }).catch(()=>{});
   return;
  }
  bar.classList.remove('done');
  const q=Q[qi],a=q.answer;
- stage.innerHTML='<div class="meta">Pertanyaan '+(qi+1)+' dari '+Q.length+'</div><h3 class="quiz-q" tabindex="-1">'+esc(q.question)+'</h3>'+q.options.map((x,i)=>'<button class="opt" data-i="'+i+'" type="button">'+esc(x)+'</button>').join('')+'<p class="fb" id="fb" aria-live="polite"></p><button class="btn hidden" id="nx" type="button">'+(qi===Q.length-1?'Lihat skor':'Lanjut')+'</button>';
+ stage.innerHTML='<div class="meta">Pertanyaan '+(qi+1)+' dari '+Q.length+'</div><h3 class="quiz-q" tabindex="-1">'+esc(q.question)+'</h3>'+q.options.map((x,i)=>'<button class="opt" data-i="'+i+'" type="button">'+esc(x)+'</button>').join('')+'<p class="fb" id="fb" aria-live="polite"></p><button class="btn hidden" id="nx" type="button" aria-describedby="fb">'+(qi===Q.length-1?'Lihat skor':'Lanjut')+'</button>';
  if(moveFocus){const h=stage.querySelector('h3');if(h)h.focus()}
  stage.querySelectorAll('.opt').forEach(b=>b.onclick=()=>{
   const i=+b.dataset.i;if(i===a)sc++;
@@ -354,23 +513,83 @@ function rq(moveFocus=false){
  });
 }
 async function loadQuiz(){
- try{Q=await api('api/quiz.php');rq(false)}catch(e){$('#quiz').textContent='Gagal memuat kuis.'}
+ try{
+  Q=await api('api/quiz.php');
+  rq(false);
+ }catch(e){
+  const box=$('#quiz');
+  box.innerHTML='<p class="fb">Gagal memuat kuis.</p><button class="btn ghost mt-sm" id="retry-quiz" type="button">Coba lagi</button>';
+  const rb=$('#retry-quiz');
+  if(rb)rb.onclick=()=>{box.textContent='Memuat ulang kuis...';loadQuiz()};
+ }
+}
+
+function renderCivicStats(){
+ const el=$('#civic-stats');
+ if(!el||!civicStats)return;
+ el.innerHTML='<span class="stat-seg">'+esc(civicStats.items)+' kata kunci</span><span class="stat-sep" aria-hidden="true">&middot;</span><span class="stat-seg">'+esc(civicStats.categories)+' jenis tempat sampah</span><span class="stat-sep" aria-hidden="true">&middot;</span><span class="stat-seg">'+esc(civicStats.reports)+' laporan warga tercatat</span>';
+ el.classList.remove('hidden');
+}
+
+async function loadStats(){
+ try{
+  civicStats=await api('api/search.php?mode=stats');
+  renderCivicStats();
+ }catch(e){}
+}
+
+function bumpReportCount(){
+ if(!civicStats)return;
+ civicStats.reports=Number(civicStats.reports||0)+1;
+ renderCivicStats();
 }
 
 $('#rf').addEventListener('submit',async e=>{
  e.preventDefault();$('#rerr').textContent='';
+ const typeVal=$('#rj').value;
+ const locVal=$('#rl').value.trim();
+ const notesVal=$('#rk').value.trim();
+ if(!locVal){
+  $('#rerr').textContent='Lokasi wajib diisi.';
+  $('#rl').focus();
+  return;
+ }
  const btn=$('#rf button[type="submit"]');
- if(btn){btn.disabled=true}
+ if(btn){
+  btn.disabled=true;
+  btn.textContent='Mengirim...';
+  btn.setAttribute('aria-busy','true');
+ }
  try{
-  await api('api/reports.php',{method:'POST',headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({type:$('#rj').value,location:$('#rl').value,notes:$('#rk').value})});
-  $('#dtxt').textContent='Terima kasih. Laporan '+$('#rj').value.toLowerCase()+' di '+$('#rl').value+' sudah dicatat.';
+  const res=await api('api/reports.php',{method:'POST',headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({type:typeVal,location:locVal,notes:notesVal})});
+  const code=(res&&res.id)?'#PLH-'+String(res.id).padStart(4,'0'):'';
+  const badge=$('#dticket');
+  if(badge){
+   if(code){badge.textContent=code+' \u00b7 Status: Baru';badge.classList.remove('hidden')}
+   else{badge.classList.add('hidden')}
+  }
+  $('#dtxt').textContent='Terima kasih. Laporan '+typeVal.toLowerCase()+' di '+locVal+(code?' sudah dicatat dengan nomor tiket '+code+'.':' sudah dicatat.');
+  bumpReportCount();
   $('#rf').classList.add('hidden');$('#done').classList.remove('hidden');
   const dh=$('#done h3');if(dh)dh.focus();
  }catch(err){$('#rerr').textContent=err.message}
- finally{if(btn){btn.disabled=false}}
+ finally{
+  if(btn){
+   btn.disabled=false;
+   btn.textContent='Kirim laporan';
+   btn.removeAttribute('aria-busy');
+  }
+ }
 });
-$('#again').onclick=()=>{$('#rf').reset();$('#rf').classList.remove('hidden');$('#done').classList.add('hidden');$('#rj').focus()};
+$('#again').onclick=()=>{
+ $('#rf').reset();
+ const badge=$('#dticket');
+ if(badge)badge.classList.add('hidden');
+ $('#rf').classList.remove('hidden');
+ $('#done').classList.add('hidden');
+ $('#rj').focus();
+};
 
 function initScrollSpy(){
  const links=Array.from(document.querySelectorAll('header nav a[href^="#"]'));
@@ -403,3 +622,4 @@ function initScrollSpy(){
 initScrollSpy();
 loadCats();
 loadQuiz();
+loadStats();
